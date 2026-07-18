@@ -177,15 +177,31 @@ Public Module E2PYaml
         Return map
     End Function
 
+    ' DatEdit entries are stored semantically: which table, which field (by name from
+    ' Data\*.def), which entry id, and the offset applied to the original value.
+    ' Unknown tables (e.g. externally loaded .dat files) fall back to the raw tuple.
     Private Function BuildDatEdit(lines As List(Of String)) As YamlSequenceNode
         Dim seq As New YamlSequenceNode()
         For Each ln As String In lines
             If ln.Trim() = "" Then Continue For
-            Dim row As New YamlSequenceNode() With {.Style = SequenceStyle.Flow}
-            For Each v As String In ln.Trim().Split(","c)
-                row.Add(PlainScalar(v))
-            Next
-            seq.Add(row)
+            Dim parts As String() = ln.Trim().Split(","c)
+            Dim i As Integer = Integer.Parse(parts(0))
+            Dim j As Integer = Integer.Parse(parts(1))
+            Dim k As Integer = Integer.Parse(parts(2))
+            If i >= 0 AndAlso i < E2PDatDefs.DatNames.Length AndAlso j >= 0 AndAlso j < E2PDatDefs.DatFieldNames(i).Length Then
+                Dim entry As New YamlMappingNode() With {.Style = MappingStyle.Flow}
+                entry.Add(PlainScalar("dat"), PlainScalar(E2PDatDefs.DatNames(i)))
+                entry.Add(PlainScalar("field"), ValueScalar(E2PDatDefs.DatFieldNames(i)(j)))
+                entry.Add(PlainScalar("id"), PlainScalar(CStr(k + E2PDatDefs.DatFieldStarts(i)(j))))
+                entry.Add(PlainScalar("delta"), PlainScalar(parts(3)))
+                seq.Add(entry)
+            Else
+                Dim row As New YamlSequenceNode() With {.Style = SequenceStyle.Flow}
+                For Each v As String In parts
+                    row.Add(PlainScalar(v))
+                Next
+                seq.Add(row)
+            End If
         Next
         Return seq
     End Function
@@ -390,12 +406,26 @@ Public Module E2PYaml
     End Sub
 
     Private Sub EmitDatEdit(node As YamlNode, out As List(Of String))
-        For Each row As YamlNode In CType(node, YamlSequenceNode)
-            Dim vals As New List(Of String)
-            For Each v As YamlNode In CType(row, YamlSequenceNode)
-                vals.Add(ScalarIn(v))
-            Next
-            out.Add(String.Join(",", vals))
+        For Each item As YamlNode In CType(node, YamlSequenceNode)
+            If TypeOf item Is YamlMappingNode Then
+                Dim map As YamlMappingNode = CType(item, YamlMappingNode)
+                Dim datStr As String = CType(map.Children(New YamlScalarNode("dat")), YamlScalarNode).Value
+                Dim fieldStr As String = CType(map.Children(New YamlScalarNode("field")), YamlScalarNode).Value
+                Dim i As Integer = Array.IndexOf(E2PDatDefs.DatNames, datStr)
+                If i < 0 Then i = Integer.Parse(datStr)
+                Dim j As Integer = Array.IndexOf(E2PDatDefs.DatFieldNames(i), fieldStr)
+                If j < 0 Then j = Integer.Parse(fieldStr)
+                Dim id As Integer = Integer.Parse(ScalarIn(map.Children(New YamlScalarNode("id"))))
+                Dim k As Integer = id - E2PDatDefs.DatFieldStarts(i)(j)
+                Dim delta As String = ScalarIn(map.Children(New YamlScalarNode("delta")))
+                out.Add(i & "," & j & "," & k & "," & delta)
+            Else
+                Dim vals As New List(Of String)
+                For Each v As YamlNode In CType(item, YamlSequenceNode)
+                    vals.Add(ScalarIn(v))
+                Next
+                out.Add(String.Join(",", vals))
+            End If
         Next
     End Sub
 

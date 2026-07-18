@@ -587,6 +587,7 @@
     <Compile Include="Module\ImageToGRPModule.vb" />
     <Compile Include="Module\initModule.vb" />
     <Compile Include="Module\IscriptModule.vb" />
+    <Compile Include="Module\E2PDatDefsModule.vb" />
     <Compile Include="Module\E2PYamlModule.vb" />
     <Compile Include="Module\LangageModule.vb" />
     <Compile Include="Module\MapModule..vb" />
