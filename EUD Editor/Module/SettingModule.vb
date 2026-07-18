@@ -8,7 +8,7 @@ Namespace ProgramSet
         Public FireGraftName As String = "FireGraft in EUDEditor"
 
 
-        Public Version As String = "0.18.1.7"
+        Public Version As String = "0.18.2.0"
         Public DatEditVersion As String = "v0.3"
         Public SCDBSerial As UInteger
 
@@ -955,6 +955,19 @@ Namespace ProjectSet
                     stream.Close()
                     file.Close()
 
+                    Dim projectDir As String = ""
+                    Try
+                        projectDir = Path.GetDirectoryName(Path.GetFullPath(MapName))
+                        If E2PYaml.IsLegacyFormat(text) = False Then
+                            'YAML project format (formatVersion 2): convert to the legacy
+                            'text once, then the parsing below stays unchanged.
+                            text = E2PYaml.YamlToLegacy(text)
+                        End If
+                    Catch ex As Exception
+                        MsgBox(Lan.GetText("MsgBox", "Invalide2s"), MsgBoxStyle.Critical, ProgramSet.ErrorFormMessage)
+                        Exit Sub
+                    End Try
+
                     Try
                         Dim Section_ProjectSET As String = FindSection(text, "ProjectSET")
 
@@ -976,8 +989,8 @@ Namespace ProjectSet
 
 
 
-                        InputMap = FindSetting(Section_ProjectSET, "InputMap")
-                        OutputMap = FindSetting(Section_ProjectSET, "OutputMap")
+                        InputMap = FromProjectRelative(FindSetting(Section_ProjectSET, "InputMap"), projectDir)
+                        OutputMap = FromProjectRelative(FindSetting(Section_ProjectSET, "OutputMap"), projectDir)
                         euddraftuse = FindSetting(Section_ProjectSET, "euddraftuse")
                         LoadFromCHK = FindSetting(Section_ProjectSET, "loadfromCHK")
                         For i = 0 To UsedSetting.Count - 1
@@ -1853,6 +1866,33 @@ Namespace ProjectSet
             End If
         End Sub
 
+        'Store InputMap/OutputMap relative to the project file when they live inside its
+        'folder, so a project keeps working after being moved or synced to another PC.
+        Public Function ToProjectRelative(filepath As String, projectDir As String) As String
+            If filepath = "" Or filepath = "0" Or projectDir = "" Then Return filepath
+            Try
+                If Path.IsPathRooted(filepath) = False Then Return filepath
+                Dim full As String = Path.GetFullPath(filepath)
+                Dim dirFull As String = Path.GetFullPath(projectDir).TrimEnd("\"c) & "\"
+                If full.StartsWith(dirFull, StringComparison.OrdinalIgnoreCase) Then
+                    Return full.Substring(dirFull.Length)
+                End If
+            Catch ex As Exception
+            End Try
+            Return filepath
+        End Function
+
+        Public Function FromProjectRelative(filepath As String, projectDir As String) As String
+            If filepath = "" Or filepath = "0" Or projectDir = "" Then Return filepath
+            Try
+                If Path.IsPathRooted(filepath) = False Then
+                    Return Path.GetFullPath(Path.Combine(projectDir, filepath))
+                End If
+            Catch ex As Exception
+            End Try
+            Return filepath
+        End Function
+
         Public Sub Save(MapName As String)
             Dim issavefilezip As Boolean = False
 
@@ -1890,8 +1930,6 @@ Namespace ProjectSet
             ProjectSet.saveStatus = True
             ProjectSet.isload = True
 
-            Dim file As FileStream
-
             Dim savefilename As String
             If issavefilezip = True And isnewfile = True Then
                 Directory.CreateDirectory(MapName.Replace(".e2p", ""))
@@ -1900,17 +1938,18 @@ Namespace ProjectSet
                 savefilename = MapName
             End If
 
-            file = New FileStream(savefilename, FileMode.Create, FileAccess.Write)
-
-            'Dim file As FileStream = New FileStream(MapName, FileMode.Create, FileAccess.Write)
-            Dim stream As StreamWriter = New StreamWriter(file)
+            Dim projectDir As String = ""
+            Try
+                projectDir = Path.GetDirectoryName(Path.GetFullPath(savefilename))
+            Catch ex As Exception
+            End Try
 
 
 
             _stringbdl.Append("S_ProjectSET" & vbCrLf) 'ProjectSET Start
             _stringbdl.Append("Version : " & ProgramSet.Version & vbCrLf)
-            _stringbdl.Append("InputMap : " & InputMap & vbCrLf)
-            _stringbdl.Append("OutputMap : " & OutputMap & vbCrLf)
+            _stringbdl.Append("InputMap : " & ToProjectRelative(InputMap, projectDir) & vbCrLf)
+            _stringbdl.Append("OutputMap : " & ToProjectRelative(OutputMap, projectDir) & vbCrLf)
             _stringbdl.Append("euddraftuse : " & euddraftuse & vbCrLf)
             _stringbdl.Append("loadfromCHK : " & LoadFromCHK & vbCrLf)
             For i = 0 To UsedSetting.Count - 1
@@ -2316,11 +2355,16 @@ Namespace ProjectSet
 
 
 
-            stream.Write(_stringbdl.ToString)
-
-
-            stream.Close()
-            file.Close()
+            'Convert to the YAML project format and write atomically:
+            'write to a temp file first, then swap it in, keeping the previous file as .bak.
+            Dim yamlText As String = E2PYaml.LegacyToYaml(_stringbdl.ToString)
+            Dim tempname As String = savefilename & ".tmp"
+            File.WriteAllText(tempname, yamlText, New UTF8Encoding(False))
+            If File.Exists(savefilename) Then
+                File.Replace(tempname, savefilename, savefilename & ".bak")
+            Else
+                File.Move(tempname, savefilename)
+            End If
 
             If issavefilezip = True Then
                 If isnewfile = True Then

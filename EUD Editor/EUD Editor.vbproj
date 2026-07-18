@@ -133,6 +133,9 @@
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="WindowsBase" />
+    <Reference Include="YamlDotNet, Version=16.0.0.0, Culture=neutral, PublicKeyToken=ec19458f3c15af5e, processorArchitecture=MSIL">
+      <HintPath>..\dll\YamlDotNet.dll</HintPath>
+    </Reference>
   </ItemGroup>
   <ItemGroup>
     <Import Include="Microsoft.VisualBasic" />
@@ -584,6 +587,7 @@
     <Compile Include="Module\ImageToGRPModule.vb" />
     <Compile Include="Module\initModule.vb" />
     <Compile Include="Module\IscriptModule.vb" />
+    <Compile Include="Module\E2PYamlModule.vb" />
     <Compile Include="Module\LangageModule.vb" />
     <Compile Include="Module\MapModule..vb" />
     <Compile Include="Module\mod_fn_HASH.vb" />
