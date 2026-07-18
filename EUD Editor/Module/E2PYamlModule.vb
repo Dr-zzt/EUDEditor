@@ -34,6 +34,11 @@ Public Module E2PYaml
 
     Private ReadOnly BtnFields As String() = {"slot", "icon", "cond", "act", "condValue", "actValue", "enableStr", "disableStr"}
 
+    ' Requirement tables in require.dat order (see ProgramData: units, upgrades,
+    ' tech research, tech use, orders) and the dat index their entry ids refer to.
+    Private ReadOnly ReqTableNames As String() = {"units", "upgrades", "techResearch", "techUse", "orders"}
+    Private ReadOnly ReqTableDat As Integer() = {0, 5, 6, 6, 7}
+
     Public Function IsLegacyFormat(text As String) As Boolean
         Return text.TrimStart().StartsWith("S_ProjectSET")
     End Function
@@ -121,7 +126,71 @@ Public Module E2PYaml
         Dim writer As New StringWriter()
         Dim stream As New YamlStream(New YamlDocument(root))
         stream.Save(New Emitter(writer, EmitterSettings.Default.WithBestWidth(4096)), False)
-        Return writer.ToString()
+        Return InjectComments(writer.ToString())
+    End Function
+
+    ' ------------------------------------------------------------ name comments
+
+    Private Function EntryName(datIndex As Integer, id As Integer) As String
+        If datIndex >= 0 AndAlso datIndex < E2PDatDefs.DatEntryNames.Length Then
+            Dim names As String() = E2PDatDefs.DatEntryNames(datIndex)
+            If id >= 0 AndAlso id < names.Length Then Return names(id)
+        End If
+        Return ""
+    End Function
+
+    ' Appends "# <entry name>" comments to lines that reference dat entries.
+    ' Comments are purely informational: the YAML parser drops them on load.
+    Private Function InjectComments(yamlText As String) As String
+        Dim lines As String() = yamlText.Split(New String() {vbCrLf}, StringSplitOptions.None)
+        Dim section As String = ""
+        Dim reqDat As Integer = -1
+        For n As Integer = 0 To lines.Length - 1
+            Dim ln As String = lines(n)
+            Dim mSection As Match = Regex.Match(ln, "^([A-Za-z_]\w*):")
+            If mSection.Success Then
+                section = mSection.Groups(1).Value
+                reqDat = -1
+                Continue For
+            End If
+
+            Dim name As String = ""
+            Select Case section
+                Case "datEdit"
+                    Dim m As Match = Regex.Match(ln, "^- \{dat: (\w+), .*, id: (\d+), delta: [^,}]+\}$")
+                    If m.Success Then
+                        name = EntryName(Array.IndexOf(E2PDatDefs.DatNames, m.Groups(1).Value),
+                                         Integer.Parse(m.Groups(2).Value))
+                    End If
+                Case "buttons"
+                    Dim m As Match = Regex.Match(ln, "^  (\d+):\s*$")
+                    If m.Success Then
+                        Dim id As Integer = Integer.Parse(m.Groups(1).Value)
+                        If id >= 0 AndAlso id < E2PDatDefs.UnitBtnNames.Length Then
+                            name = E2PDatDefs.UnitBtnNames(id)
+                            ln = ln.TrimEnd()
+                        End If
+                    End If
+                Case "fireGraft"
+                    Dim m As Match = Regex.Match(ln, "^  FireGraft(\d+): ")
+                    If m.Success Then name = EntryName(0, Integer.Parse(m.Groups(1).Value))
+                Case "fileManager"
+                    Dim m As Match = Regex.Match(ln, "^  (?:wireframData|grpwireData|tranwireData)(\d+): ")
+                    If m.Success Then name = EntryName(0, Integer.Parse(m.Groups(1).Value))
+                Case "requirements"
+                    Dim mTable As Match = Regex.Match(ln, "^- table: (\w+)$")
+                    If mTable.Success Then
+                        Dim tableIdx As Integer = Array.IndexOf(ReqTableNames, mTable.Groups(1).Value)
+                        reqDat = If(tableIdx >= 0, ReqTableDat(tableIdx), -1)
+                    Else
+                        Dim m As Match = Regex.Match(ln, "^  id: (\d+)$")
+                        If m.Success Then name = EntryName(reqDat, Integer.Parse(m.Groups(1).Value))
+                    End If
+            End Select
+
+            If name <> "" Then lines(n) = ln & " # " & name
+        Next
+        Return String.Join(vbCrLf, lines)
     End Function
 
     ' extraedssetting / extramainsettings hold multi-line euddraft plugin text (the legacy
@@ -235,8 +304,11 @@ Public Module E2PYaml
             If Not m.Success Then Continue For
             Dim id As String = m.Groups(2).Value & "," & m.Groups(3).Value
             If Not entries.ContainsKey(id) Then
+                Dim tableIdx As Integer = Integer.Parse(m.Groups(2).Value)
+                Dim tableName As String = If(tableIdx >= 0 AndAlso tableIdx < ReqTableNames.Length,
+                                             ReqTableNames(tableIdx), m.Groups(2).Value)
                 Dim ent As New YamlMappingNode()
-                ent.Add(PlainScalar("table"), PlainScalar(m.Groups(2).Value))
+                ent.Add(PlainScalar("table"), PlainScalar(tableName))
                 ent.Add(PlainScalar("id"), PlainScalar(m.Groups(3).Value))
                 entries(id) = ent
                 codes(id) = New YamlSequenceNode()
@@ -447,7 +519,9 @@ Public Module E2PYaml
     Private Sub EmitRequirements(node As YamlNode, out As List(Of String))
         For Each ent As YamlNode In CType(node, YamlSequenceNode)
             Dim map As YamlMappingNode = CType(ent, YamlMappingNode)
-            Dim i As String = ScalarIn(map.Children(New YamlScalarNode("table")))
+            Dim tableStr As String = CType(map.Children(New YamlScalarNode("table")), YamlScalarNode).Value
+            Dim tableIdx As Integer = Array.IndexOf(ReqTableNames, tableStr)
+            Dim i As String = If(tableIdx >= 0, CStr(tableIdx), tableStr)
             Dim j As String = ScalarIn(map.Children(New YamlScalarNode("id")))
             Dim code As YamlSequenceNode = CType(map.Children(New YamlScalarNode("code")), YamlSequenceNode)
             out.Add("ReqUse" & i & "," & j & " : " & ScalarIn(map.Children(New YamlScalarNode("use"))))

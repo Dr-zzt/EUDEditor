@@ -2,6 +2,7 @@
 
 - New human-readable YAML project file format (.e2p/.e2s). Existing projects open as before and are converted on next save
 - DatEdit entries are stored semantically (dat name, field name, entry id, delta) instead of raw number tuples
+- Entry names are annotated as YAML comments (units, buttons, requirements, FireGraft, wireframes); requirement tables are stored by name
 - Atomic saves: project file can no longer be corrupted by a crash during save; previous version is kept as .bak
 - Input/Output Map paths are stored relative to the project folder, so moved or synced projects keep working
 - NOTE: older versions cannot open projects saved in the new format
