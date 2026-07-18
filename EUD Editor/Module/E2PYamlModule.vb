@@ -243,7 +243,18 @@ Public Module E2PYaml
         For Each ln As String In lines
             If ln.Contains(" : ") Then
                 Dim pos As Integer = ln.IndexOf(" : ")
-                map.Add(New YamlScalarNode(ln.Substring(0, pos)), ValueScalar(ln.Substring(pos + 3)))
+                Dim key As String = ln.Substring(0, pos)
+                Dim value As String = ln.Substring(pos + 3)
+                If key = "nqccommands" AndAlso value.StartsWith("\") Then
+                    ' "\"-separated NQC command records (see PluginForm): one list item each
+                    Dim seq As New YamlSequenceNode()
+                    For Each item As String In value.Substring(1).Split("\"c)
+                        seq.Add(ValueScalar(item))
+                    Next
+                    map.Add(PlainScalar(key), seq)
+                Else
+                    map.Add(New YamlScalarNode(key), ValueScalar(value))
+                End If
             ElseIf ln <> "" Then
                 rawLines.Add(ln)
             End If
@@ -493,6 +504,12 @@ Public Module E2PYaml
                 For Each item As YamlNode In CType(entry.Value, YamlSequenceNode)
                     out.Add(ScalarIn(item))
                 Next
+            ElseIf TypeOf entry.Value Is YamlSequenceNode Then
+                Dim parts As New List(Of String)
+                For Each item As YamlNode In CType(entry.Value, YamlSequenceNode)
+                    parts.Add(ScalarIn(item))
+                Next
+                out.Add(key & " : \" & String.Join("\", parts))
             Else
                 out.AddRange((key & " : " & ScalarIn(entry.Value)).Split(New String() {vbLf}, StringSplitOptions.None))
             End If
