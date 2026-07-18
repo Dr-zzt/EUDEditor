@@ -469,6 +469,9 @@ Module ProgramData
         ReadDATAFile("sfxdata") '기술
         ReadDATAFile("portdata") '명령
 
+        'YAML 프로젝트 파일의 datEdit는 절대값으로 저장되므로 변환기에 원본값 조회를 제공.
+        E2PYaml.BaseValue = Function(dat As Integer, field As Integer, idx As Integer) CLng(DatEditDATA(dat).data(field)(idx))
+
 
 
         LoadCodeLIST("Units")

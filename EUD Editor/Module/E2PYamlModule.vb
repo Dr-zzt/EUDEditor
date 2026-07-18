@@ -39,6 +39,12 @@ Public Module E2PYaml
     Private ReadOnly ReqTableNames As String() = {"units", "upgrades", "techResearch", "techUse", "orders"}
     Private ReadOnly ReqTableDat As Integer() = {0, 5, 6, 6, 7}
 
+    ' Original .dat value lookup: (datIndex, fieldIndex, rawIndex) -> base value.
+    ' The editor sets this after DataLoad so datEdit entries can be stored as
+    ' absolute values ("value") instead of offsets ("delta"). When Nothing
+    ' (standalone use) the converter falls back to writing deltas.
+    Public BaseValue As Func(Of Integer, Integer, Integer, Long) = Nothing
+
     Public Function IsLegacyFormat(text As String) As Boolean
         Return text.TrimStart().StartsWith("S_ProjectSET")
     End Function
@@ -105,11 +111,17 @@ Public Module E2PYaml
         Dim root As New YamlMappingNode()
         root.Add(PlainScalar("formatVersion"), PlainScalar("2"))
 
-        For Each sec As Section In SplitSections(legacyText)
+        Dim sections As List(Of Section) = SplitSections(legacyText)
+        ' DatEditStyle project setting: "delta" keeps raw offsets, the default
+        ' ("value") stores absolute values whenever the base data is available.
+        Dim deltaStyle As Boolean = sections.Any(Function(s) s.Name = "ProjectSET" AndAlso
+            s.Lines.Contains("DatEditStyle : delta"))
+
+        For Each sec As Section In sections
             Dim key As String = If(SectionToKey.ContainsKey(sec.Name), SectionToKey(sec.Name), sec.Name)
             Select Case sec.Name
                 Case "DatEditSET"
-                    root.Add(PlainScalar(key), BuildDatEdit(sec.Lines))
+                    root.Add(PlainScalar(key), BuildDatEdit(sec.Lines, deltaStyle))
                 Case "BtnSET"
                     root.Add(PlainScalar(key), BuildButtons(sec.Lines))
                 Case "ReqSET"
@@ -157,7 +169,7 @@ Public Module E2PYaml
             Dim name As String = ""
             Select Case section
                 Case "datEdit"
-                    Dim m As Match = Regex.Match(ln, "^- \{dat: (\w+), .*, id: (\d+), delta: [^,}]+\}$")
+                    Dim m As Match = Regex.Match(ln, "^- \{dat: (\w+), .*, id: (\d+), (?:delta|value): [^,}]+\}$")
                     If m.Success Then
                         name = EntryName(Array.IndexOf(E2PDatDefs.DatNames, m.Groups(1).Value),
                                          Integer.Parse(m.Groups(2).Value))
@@ -247,9 +259,11 @@ Public Module E2PYaml
     End Function
 
     ' DatEdit entries are stored semantically: which table, which field (by name from
-    ' Data\*.def), which entry id, and the offset applied to the original value.
+    ' Data\*.def), which entry id, and the resulting value ("value", absolute) or the
+    ' offset applied to the original value ("delta", used when DatEditStyle is delta
+    ' or the base data is unavailable).
     ' Unknown tables (e.g. externally loaded .dat files) fall back to the raw tuple.
-    Private Function BuildDatEdit(lines As List(Of String)) As YamlSequenceNode
+    Private Function BuildDatEdit(lines As List(Of String), deltaStyle As Boolean) As YamlSequenceNode
         Dim seq As New YamlSequenceNode()
         For Each ln As String In lines
             If ln.Trim() = "" Then Continue For
@@ -262,7 +276,15 @@ Public Module E2PYaml
                 entry.Add(PlainScalar("dat"), PlainScalar(E2PDatDefs.DatNames(i)))
                 entry.Add(PlainScalar("field"), ValueScalar(E2PDatDefs.DatFieldNames(i)(j)))
                 entry.Add(PlainScalar("id"), PlainScalar(CStr(k + E2PDatDefs.DatFieldStarts(i)(j))))
-                entry.Add(PlainScalar("delta"), PlainScalar(parts(3)))
+                Dim stored As Boolean = False
+                If Not deltaStyle AndAlso BaseValue IsNot Nothing Then
+                    Try
+                        entry.Add(PlainScalar("value"), PlainScalar(CStr(BaseValue(i, j, k) + Long.Parse(parts(3)))))
+                        stored = True
+                    Catch
+                    End Try
+                End If
+                If Not stored Then entry.Add(PlainScalar("delta"), PlainScalar(parts(3)))
                 seq.Add(entry)
             Else
                 Dim row As New YamlSequenceNode() With {.Style = SequenceStyle.Flow}
@@ -489,7 +511,16 @@ Public Module E2PYaml
                 If j < 0 Then j = Integer.Parse(fieldStr)
                 Dim id As Integer = Integer.Parse(ScalarIn(map.Children(New YamlScalarNode("id"))))
                 Dim k As Integer = id - E2PDatDefs.DatFieldStarts(i)(j)
-                Dim delta As String = ScalarIn(map.Children(New YamlScalarNode("delta")))
+                Dim delta As String
+                Dim valueKey As New YamlScalarNode("value")
+                If map.Children.ContainsKey(valueKey) Then
+                    If BaseValue Is Nothing Then
+                        Throw New InvalidDataException("datEdit 'value' entries need the base dat data; use 'delta' instead")
+                    End If
+                    delta = CStr(Long.Parse(ScalarIn(map.Children(valueKey))) - BaseValue(i, j, k))
+                Else
+                    delta = ScalarIn(map.Children(New YamlScalarNode("delta")))
+                End If
                 out.Add(i & "," & j & "," & k & "," & delta)
             Else
                 Dim vals As New List(Of String)

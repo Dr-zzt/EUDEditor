@@ -73,6 +73,8 @@ Namespace ProjectSet
         Public LoadFromCHK As Boolean
         Public TriggerSetTouse As Boolean
         Public TriggerPlayer As UInteger
+        'YAML datEdit 저장 방식: "value"(절대값, 기본) 또는 "delta"(원본 대비 증분)
+        Public DatEditStyle As String = "value"
 
 
 
@@ -754,6 +756,7 @@ Namespace ProjectSet
             TriggerSetTouse = True
             EUDEditorDebug = False
             epTraceDebug = False
+            DatEditStyle = "value"
 
             For i = 0 To 7
                 DatEditDATA(i).Reset()
@@ -993,6 +996,7 @@ Namespace ProjectSet
                         OutputMap = FromProjectRelative(FindSetting(Section_ProjectSET, "OutputMap"), projectDir)
                         euddraftuse = FindSetting(Section_ProjectSET, "euddraftuse")
                         LoadFromCHK = FindSetting(Section_ProjectSET, "loadfromCHK")
+                        DatEditStyle = If(FindSetting(Section_ProjectSET, "DatEditStyle") = "delta", "delta", "value")
                         For i = 0 To UsedSetting.Count - 1
                             UsedSetting(i) = FindSetting(Section_ProjectSET, "UsedSetting" & i)
                         Next
@@ -1952,6 +1956,7 @@ Namespace ProjectSet
             _stringbdl.Append("OutputMap : " & ToProjectRelative(OutputMap, projectDir) & vbCrLf)
             _stringbdl.Append("euddraftuse : " & euddraftuse & vbCrLf)
             _stringbdl.Append("loadfromCHK : " & LoadFromCHK & vbCrLf)
+            _stringbdl.Append("DatEditStyle : " & DatEditStyle & vbCrLf)
             For i = 0 To UsedSetting.Count - 1
                 _stringbdl.Append("UsedSetting" & i & " : " & UsedSetting(i) & vbCrLf)
             Next
