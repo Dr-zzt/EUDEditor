@@ -156,13 +156,11 @@ Public Module E2PYaml
     Private Function InjectComments(yamlText As String) As String
         Dim lines As String() = yamlText.Split(New String() {vbCrLf}, StringSplitOptions.None)
         Dim section As String = ""
-        Dim reqDat As Integer = -1
         For n As Integer = 0 To lines.Length - 1
             Dim ln As String = lines(n)
             Dim mSection As Match = Regex.Match(ln, "^([A-Za-z_]\w*):")
             If mSection.Success Then
                 section = mSection.Groups(1).Value
-                reqDat = -1
                 Continue For
             End If
 
@@ -190,19 +188,63 @@ Public Module E2PYaml
                     Dim m As Match = Regex.Match(ln, "^  (?:wireframData|grpwireData|tranwireData)(\d+): ")
                     If m.Success Then name = EntryName(0, Integer.Parse(m.Groups(1).Value))
                 Case "requirements"
-                    Dim mTable As Match = Regex.Match(ln, "^- table: (\w+)$")
-                    If mTable.Success Then
-                        Dim tableIdx As Integer = Array.IndexOf(ReqTableNames, mTable.Groups(1).Value)
-                        reqDat = If(tableIdx >= 0, ReqTableDat(tableIdx), -1)
-                    Else
-                        Dim m As Match = Regex.Match(ln, "^  id: (\d+)$")
-                        If m.Success Then name = EntryName(reqDat, Integer.Parse(m.Groups(1).Value))
+                    Dim m As Match = Regex.Match(ln, "^- \{table: (\w+), id: (\d+), .*code: \[([^\]]*)\]\}$")
+                    If m.Success Then
+                        Dim tableIdx As Integer = Array.IndexOf(ReqTableNames, m.Groups(1).Value)
+                        If tableIdx >= 0 Then
+                            Dim entName As String = EntryName(ReqTableDat(tableIdx), Integer.Parse(m.Groups(2).Value))
+                            Dim interp As String = ReqCodeComment(m.Groups(3).Value)
+                            name = If(entName = "", interp, entName & If(interp = "", "", ": " & interp))
+                        End If
                     End If
             End Select
 
             If name <> "" Then lines(n) = ln & " # " & name
         Next
         Return String.Join(vbCrLf, lines)
+    End Function
+
+    ' Human-readable rendering of a requirement opcode program, mirroring how
+    ' FireGraftForm.ReadReqData displays it: 0xFFnn opcodes take their name from
+    ' reqopcode.txt, opcodes 2/3/4 consume the next value as a unit (37: tech),
+    ' and bare values mean "Must have..." that unit. Informational comment only.
+    Private Function ReqCodeComment(codesText As String) As String
+        If codesText.Trim() = "" Then Return ""
+        Dim parts As New List(Of String)
+        Try
+            Dim vals As Integer() = codesText.Split(","c).Select(Function(s) Integer.Parse(s.Trim())).ToArray()
+            Dim n As Integer = 0
+            While n < vals.Length
+                Dim c As Integer = vals(n)
+                If c > &HFF Then
+                    Dim op As Integer = If(c = &HFFFF, 0, c - &HFF00)
+                    Dim opName As String = If(op >= 0 AndAlso op < E2PDatDefs.ReqOpcodeNames.Length,
+                                              E2PDatDefs.ReqOpcodeNames(op).Trim(), "op" & op)
+                    If (op = 2 OrElse op = 3 OrElse op = 4 OrElse op = 37) AndAlso n + 1 < vals.Length Then
+                        n += 1
+                        opName = opName & " " & EntryName(If(op = 37, 6, 0), vals(n))
+                    End If
+                    parts.Add(opName)
+                Else
+                    parts.Add(E2PDatDefs.ReqOpcodeNames(3).Trim() & " " & EntryName(0, c))
+                End If
+                n += 1
+            End While
+        Catch
+            Return ""
+        End Try
+        Dim result As String = String.Join("; ", parts)
+        If result.Length > 160 Then
+            Dim keep As New List(Of String)
+            Dim total As Integer = 0
+            For Each p As String In parts
+                If total + p.Length > 150 Then Exit For
+                keep.Add(p)
+                total += p.Length + 2
+            Next
+            result = String.Join("; ", keep) & "; …"
+        End If
+        Return result
     End Function
 
     ' extraedssetting / extramainsettings hold multi-line euddraft plugin text (the legacy
@@ -340,11 +382,11 @@ Public Module E2PYaml
                 Dim tableIdx As Integer = Integer.Parse(m.Groups(2).Value)
                 Dim tableName As String = If(tableIdx >= 0 AndAlso tableIdx < ReqTableNames.Length,
                                              ReqTableNames(tableIdx), m.Groups(2).Value)
-                Dim ent As New YamlMappingNode()
+                Dim ent As New YamlMappingNode() With {.Style = MappingStyle.Flow}
                 ent.Add(PlainScalar("table"), PlainScalar(tableName))
                 ent.Add(PlainScalar("id"), PlainScalar(m.Groups(3).Value))
                 entries(id) = ent
-                codes(id) = New YamlSequenceNode()
+                codes(id) = New YamlSequenceNode() With {.Style = SequenceStyle.Flow}
                 seq.Add(ent)
             End If
             Select Case m.Groups(1).Value
